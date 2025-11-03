@@ -1,0 +1,35 @@
+run:
+  timeout: 5m
+  tests: true
+  skip-dirs:
+    - migration
+    - performance
+    - deployments/monitoring
+    - tests/framework
+  skip-files:
+    - ".*_test\\.go$"
+
+issues:
+  exclude-dirs:
+    - migration
+    - performance
+    - deployments/monitoring
+    - tests/framework
+  exclude-files:
+    - "handlers/search_handler_test\\.go"
+    - "services/integration_test\\.go"
+    - "tests/.*\\.go"
+
+linters:
+  enable:
+    - gofmt
+    - govet
+    - staticcheck
+  disable:
+    - errcheck
+    - gosimple
+    - unused
+
+linters-settings:
+  govet:
+    check-shadowing: false
