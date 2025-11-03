@@ -1,0 +1,28 @@
+{
+  "project": [
+    {
+      "key": "ink-gateway-status",
+      "value": "專案完成度40%，第一輪semantic-text-processor已完成，第二輪unified-chunk-system進行中，待完成API層整合、搜尋優化、資料遷移、效能測試、部署準備、文件更新",
+      "namespace": "project",
+      "timestamp": 1758371872894
+    },
+    {
+      "key": "next-steps",
+      "value": "優先順序：1.完成API層整合 2.實作資料遷移腳本 3.加強批量操作效能 4.完善搜尋優化 5.撰寫完整操作手冊",
+      "namespace": "project",
+      "timestamp": 1758371888395
+    },
+    {
+      "key": "tech-stack",
+      "value": "Go 1.21, Gorilla Mux, Supabase API, PostgreSQL, PGVector, Apache AGE, 環境需配置.env檔案",
+      "namespace": "project",
+      "timestamp": 1758371903401
+    },
+    {
+      "key": "voice-setup",
+      "value": "語音助理小西已配置完成，使用python3 ~/Documents/claude-code-voice/claude_notify.py進行通知，支援5種情緒類型",
+      "namespace": "project",
+      "timestamp": 1758371920618
+    }
+  ]
+}

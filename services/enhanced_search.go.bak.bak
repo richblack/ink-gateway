@@ -1,0 +1,567 @@
+package services
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"semantic-text-processor/models"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+)
+
+// EnhancedSearchService provides optimized search operations with advanced caching and performance monitoring
+type EnhancedSearchService interface {
+	// Task 6.1: Optimized semantic search with unified chunk indexing
+	OptimizedSemanticSearch(ctx context.Context, req *models.OptimizedSearchRequest) (*models.OptimizedSearchResponse, error)
+
+	// Task 6.2: High-performance tag search with statistics
+	HighPerformanceTagSearch(ctx context.Context, req *models.OptimizedTagSearchRequest) (*models.TagSearchResponse, error)
+
+	// Task 6.3: Full-text search with relevance scoring
+	FullTextSearchOptimized(ctx context.Context, req *models.FullTextRequest) (*models.FullTextResponse, error)
+
+	// Performance benchmarking
+	RunSearchBenchmarks(ctx context.Context) (*models.BenchmarkResults, error)
+
+	// Cache management
+	WarmSearchCache(ctx context.Context, patterns []string) error
+	GetSearchStatistics(ctx context.Context) (*models.SearchStatistics, error)
+}
+
+// enhancedSearchService implements EnhancedSearchService with optimizations
+type enhancedSearchService struct {
+	// Core services
+	unifiedService   UnifiedChunkService
+	embeddingService EmbeddingService
+	searchCache      SearchCacheService
+
+	// Enhanced caching
+	vectorCache      *VectorSimilarityCache
+	tagStatsCache    *TagStatisticsCache
+	fullTextCache    *FullTextIndexCache
+
+	// Performance monitoring
+	monitor          QueryPerformanceMonitor
+	logger           *log.Logger
+
+	// Configuration
+	config           *EnhancedSearchConfig
+
+	// Internal state
+	mutex            sync.RWMutex
+	searchPatterns   map[string]*SearchPattern
+}
+
+// EnhancedSearchConfig holds configuration for enhanced search
+type EnhancedSearchConfig struct {
+	// Vector search optimization
+	VectorBatchSize         int           `json:"vector_batch_size"`
+	VectorCacheEnabled      bool          `json:"vector_cache_enabled"`
+	VectorCacheTTL          time.Duration `json:"vector_cache_ttl"`
+
+	// Tag search optimization
+	TagStatsRefreshInterval time.Duration `json:"tag_stats_refresh_interval"`
+	TagCacheSize            int           `json:"tag_cache_size"`
+	PopularTagThreshold     int           `json:"popular_tag_threshold"`
+
+	// Full-text search optimization
+	FullTextIndexRefresh    time.Duration `json:"fulltext_index_refresh"`
+	RelevanceWeights        RelevanceWeights `json:"relevance_weights"`
+
+	// Performance settings
+	MaxConcurrentSearches   int           `json:"max_concurrent_searches"`
+	SlowQueryThreshold      time.Duration `json:"slow_query_threshold"`
+	BenchmarkInterval       time.Duration `json:"benchmark_interval"`
+
+	// Cache preloading
+	PreloadEnabled          bool          `json:"preload_enabled"`
+	PreloadPatterns         []string      `json:"preload_patterns"`
+	PreloadBatchSize        int           `json:"preload_batch_size"`
+}
+
+// RelevanceWeights defines scoring weights for full-text search
+type RelevanceWeights struct {
+	TitleWeight    float64 `json:"title_weight"`
+	ContentWeight  float64 `json:"content_weight"`
+	TagWeight      float64 `json:"tag_weight"`
+	RecencyWeight  float64 `json:"recency_weight"`
+	PopularityWeight float64 `json:"popularity_weight"`
+}
+
+// SearchPattern represents an analyzed search pattern
+type SearchPattern struct {
+	Pattern     string    `json:"pattern"`
+	Frequency   int       `json:"frequency"`
+	LastUsed    time.Time `json:"last_used"`
+	AvgDuration time.Duration `json:"avg_duration"`
+	CacheHitRate float64   `json:"cache_hit_rate"`
+}
+
+// NewEnhancedSearchService creates a new enhanced search service
+func NewEnhancedSearchService(
+	unifiedService UnifiedChunkService,
+	embeddingService EmbeddingService,
+	searchCache SearchCacheService,
+	monitor QueryPerformanceMonitor,
+	logger *log.Logger,
+	config *EnhancedSearchConfig,
+) EnhancedSearchService {
+	if config == nil {
+		config = DefaultEnhancedSearchConfig()
+	}
+
+	service := &enhancedSearchService{
+		unifiedService:   unifiedService,
+		embeddingService: embeddingService,
+		searchCache:      searchCache,
+		monitor:          monitor,
+		logger:           logger,
+		config:           config,
+		searchPatterns:   make(map[string]*SearchPattern),
+	}
+
+	// Initialize enhanced caches
+	service.vectorCache = NewVectorSimilarityCache(config.VectorCacheSize, config.VectorCacheTTL)
+	service.tagStatsCache = NewTagStatisticsCache(config.TagCacheSize, config.TagStatsRefreshInterval)
+	service.fullTextCache = NewFullTextIndexCache(logger)
+
+	// Start background processes
+	if config.PreloadEnabled {
+		go service.startCachePreloader()
+	}
+
+	if config.BenchmarkInterval > 0 {
+		go service.startPerformanceBenchmarks()
+	}
+
+	return service
+}
+
+// DefaultEnhancedSearchConfig returns default configuration
+func DefaultEnhancedSearchConfig() *EnhancedSearchConfig {
+	return &EnhancedSearchConfig{
+		VectorBatchSize:         100,
+		VectorCacheEnabled:      true,
+		VectorCacheTTL:          30 * time.Minute,
+		TagStatsRefreshInterval: 10 * time.Minute,
+		TagCacheSize:            10000,
+		PopularTagThreshold:     100,
+		FullTextIndexRefresh:    5 * time.Minute,
+		RelevanceWeights: RelevanceWeights{
+			TitleWeight:      2.0,
+			ContentWeight:    1.0,
+			TagWeight:        1.5,
+			RecencyWeight:    0.5,
+			PopularityWeight: 0.3,
+		},
+		MaxConcurrentSearches:   50,
+		SlowQueryThreshold:      2 * time.Second,
+		BenchmarkInterval:       1 * time.Hour,
+		PreloadEnabled:          true,
+		PreloadPatterns:         []string{"popular_searches", "recent_queries"},
+		PreloadBatchSize:        20,
+	}
+}
+
+// Task 6.1: OptimizedSemanticSearch implements enhanced semantic search with unified chunk indexing
+func (s *enhancedSearchService) OptimizedSemanticSearch(ctx context.Context, req *models.OptimizedSearchRequest) (*models.SearchResponse, error) {
+	start := time.Now()
+
+	// Input validation
+	if req.Query == "" {
+		return &models.SearchResponse{
+			Results:     []models.SearchResult{},
+			TotalCount:  0,
+			Duration:    time.Since(start),
+			CacheHit:    false,
+			Optimizations: []string{"early_termination_empty_query"},
+		}, nil
+	}
+
+	// Generate cache key
+	cacheKey := s.generateSemanticCacheKey(req)
+
+	// Try vector similarity cache first
+	if s.config.VectorCacheEnabled {
+		if cached, found := s.vectorCache.Get(cacheKey); found {
+			s.monitor.RecordQuery("semantic_search_cache_hit", time.Since(start), len(cached.Results))
+			return &models.SearchResponse{
+				Results:       cached.Results,
+				TotalCount:    cached.TotalCount,
+				Duration:      time.Since(start),
+				CacheHit:      true,
+				Optimizations: []string{"vector_cache_hit"},
+			}, nil
+		}
+	}
+
+	// Generate embedding for query
+	queryEmbedding, err := s.embeddingService.GenerateEmbedding(ctx, req.Query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate query embedding: %w", err)
+	}
+
+	// Build optimized search query using unified chunk system
+	unifiedQuery := &models.UnifiedSearchQuery{
+		QueryText:          req.Query,
+		QueryVector:        queryEmbedding,
+		Filters:            req.Filters,
+		Limit:              req.Limit,
+		MinSimilarity:      req.MinSimilarity,
+		UseVectorIndex:     true,
+		BatchSize:          s.config.VectorBatchSize,
+		IncludeMetadata:    req.IncludeMetadata,
+		OptimizeForSpeed:   true,
+	}
+
+	// Execute optimized search with unified chunk service
+	searchResult, err := s.unifiedService.OptimizedVectorSearch(ctx, unifiedQuery)
+	if err != nil {
+		s.monitor.RecordQuery("semantic_search_error", time.Since(start), 0)
+		return nil, fmt.Errorf("optimized vector search failed: %w", err)
+	}
+
+	// Convert to response format
+	results := make([]models.SearchResult, len(searchResult.Chunks))
+	for i, chunk := range searchResult.Chunks {
+		results[i] = models.SearchResult{
+			ChunkID:     chunk.ChunkID,
+			Content:     chunk.Content,
+			Similarity:  chunk.SimilarityScore,
+			Relevance:   s.calculateRelevanceScore(chunk, req.Query),
+			Metadata:    chunk.Metadata,
+			Tags:        chunk.Tags,
+		}
+	}
+
+	response := &models.SearchResponse{
+		Results:    results,
+		TotalCount: searchResult.TotalCount,
+		Duration:   time.Since(start),
+		CacheHit:   false,
+		Optimizations: []string{
+			"unified_chunk_index",
+			"vector_batch_processing",
+			"optimized_joins",
+		},
+	}
+
+	// Cache the results
+	if s.config.VectorCacheEnabled && len(results) > 0 {
+		s.vectorCache.Set(cacheKey, &VectorSearchResult{
+			Results:    results,
+			TotalCount: searchResult.TotalCount,
+		})
+	}
+
+	// Record performance metrics
+	s.monitor.RecordQuery("semantic_search_optimized", time.Since(start), len(results))
+	s.updateSearchPattern("semantic:"+req.Query, time.Since(start))
+
+	return response, nil
+}
+
+// Task 6.2: HighPerformanceTagSearch implements optimized tag search with statistics
+func (s *enhancedSearchService) HighPerformanceTagSearch(ctx context.Context, req *models.TagSearchRequest) (*models.TagSearchResponse, error) {
+	start := time.Now()
+
+	// Input validation
+	if len(req.Tags) == 0 {
+		return &models.TagSearchResponse{
+			Results:      []models.TaggedChunk{},
+			TagStats:     map[string]int{},
+			Duration:     time.Since(start),
+			Optimizations: []string{"early_termination_no_tags"},
+		}, nil
+	}
+
+	// Check tag statistics cache
+	tagStats, found := s.tagStatsCache.GetStats(req.Tags)
+	if !found {
+		// Refresh tag statistics
+		if err := s.refreshTagStatistics(ctx); err != nil {
+			s.logger.Printf("Warning: failed to refresh tag statistics: %v", err)
+		}
+		tagStats, _ = s.tagStatsCache.GetStats(req.Tags)
+	}
+
+	// Optimize tag search order based on statistics
+	optimizedTags := s.optimizeTagSearchOrder(req.Tags, tagStats)
+
+	// Use bit-vector approach for tag combinations if multiple tags
+	var results []models.TaggedChunk
+	var err error
+
+	if len(optimizedTags) == 1 {
+		// Single tag search - use direct index
+		results, err = s.unifiedService.SearchByTag(ctx, optimizedTags[0], req.Limit)
+	} else {
+		// Multi-tag search - use optimized combination algorithm
+		results, err = s.executeOptimizedTagCombination(ctx, optimizedTags, req.CombinationMode, req.Limit)
+	}
+
+	if err != nil {
+		s.monitor.RecordQuery("tag_search_error", time.Since(start), 0)
+		return nil, fmt.Errorf("tag search failed: %w", err)
+	}
+
+	// Apply additional filters if specified
+	if len(req.Filters) > 0 {
+		results = s.applyTagSearchFilters(results, req.Filters)
+	}
+
+	// Sort by relevance if requested
+	if req.SortByRelevance {
+		s.sortTagResultsByRelevance(results, req.Tags)
+	}
+
+	response := &models.TagSearchResponse{
+		Results:   results,
+		TagStats:  tagStats,
+		Duration:  time.Since(start),
+		TotalCount: len(results),
+		Optimizations: []string{
+			"tag_statistics_optimization",
+			"bit_vector_combinations",
+			"optimized_tag_order",
+		},
+	}
+
+	// Record performance metrics
+	s.monitor.RecordQuery("tag_search_optimized", time.Since(start), len(results))
+	s.updateSearchPattern("tag:"+strings.Join(req.Tags, ","), time.Since(start))
+
+	return response, nil
+}
+
+// Task 6.3: FullTextSearchOptimized implements enhanced full-text search with relevance scoring
+func (s *enhancedSearchService) FullTextSearchOptimized(ctx context.Context, req *models.FullTextRequest) (*models.FullTextResponse, error) {
+	start := time.Now()
+
+	// Input validation and query preprocessing
+	if req.Query == "" {
+		return &models.FullTextResponse{
+			Results:      []models.FullTextResult{},
+			Suggestions:  []string{},
+			Duration:     time.Since(start),
+			Optimizations: []string{"early_termination_empty_query"},
+		}, nil
+	}
+
+	// Preprocess query for better matching
+	processedQuery := s.preprocessTextQuery(req.Query)
+
+	// Check full-text index cache
+	cacheKey := s.generateFullTextCacheKey(req)
+	if cached, found := s.fullTextCache.Get(cacheKey); found {
+		s.monitor.RecordQuery("fulltext_search_cache_hit", time.Since(start), len(cached.Results))
+		return &models.FullTextResponse{
+			Results:      cached.Results,
+			Suggestions:  cached.Suggestions,
+			Duration:     time.Since(start),
+			TotalCount:   cached.TotalCount,
+			CacheHit:     true,
+			Optimizations: []string{"fulltext_cache_hit"},
+		}, nil
+	}
+
+	// Execute full-text search with optimized indexing
+	searchResults, err := s.unifiedService.FullTextSearch(ctx, &models.FullTextSearchQuery{
+		Query:               processedQuery,
+		OriginalQuery:       req.Query,
+		Limit:               req.Limit,
+		UseOptimizedIndexes: true,
+		RankingFunction:     "bm25",
+		IncludeSnippets:     req.IncludeSnippets,
+	})
+	if err != nil {
+		s.monitor.RecordQuery("fulltext_search_error", time.Since(start), 0)
+		return nil, fmt.Errorf("full-text search failed: %w", err)
+	}
+
+	// Apply relevance scoring with configurable weights
+	scoredResults := s.applyRelevanceScoring(searchResults, req.Query, s.config.RelevanceWeights)
+
+	// Generate search suggestions for query expansion
+	suggestions := s.generateSearchSuggestions(req.Query, len(scoredResults))
+
+	// Sort by relevance score
+	sort.Slice(scoredResults, func(i, j int) bool {
+		return scoredResults[i].RelevanceScore > scoredResults[j].RelevanceScore
+	})
+
+	// Limit results
+	if len(scoredResults) > req.Limit {
+		scoredResults = scoredResults[:req.Limit]
+	}
+
+	response := &models.FullTextResponse{
+		Results:     scoredResults,
+		Suggestions: suggestions,
+		Duration:    time.Since(start),
+		TotalCount:  len(searchResults),
+		CacheHit:    false,
+		Optimizations: []string{
+			"gin_fulltext_indexes",
+			"bm25_ranking",
+			"relevance_scoring",
+			"query_preprocessing",
+		},
+	}
+
+	// Cache the results
+	s.fullTextCache.Set(cacheKey, &FullTextCacheEntry{
+		Results:     scoredResults,
+		Suggestions: suggestions,
+		TotalCount:  len(searchResults),
+	})
+
+	// Record performance metrics
+	s.monitor.RecordQuery("fulltext_search_optimized", time.Since(start), len(scoredResults))
+	s.updateSearchPattern("fulltext:"+req.Query, time.Since(start))
+
+	return response, nil
+}
+
+// RunSearchBenchmarks executes comprehensive performance benchmarks
+func (s *enhancedSearchService) RunSearchBenchmarks(ctx context.Context) (*models.BenchmarkResults, error) {
+	start := time.Now()
+
+	results := &models.BenchmarkResults{
+		Timestamp:         start,
+		SemanticSearch:    s.benchmarkSemanticSearch(ctx),
+		TagSearch:         s.benchmarkTagSearch(ctx),
+		FullTextSearch:    s.benchmarkFullTextSearch(ctx),
+		CachePerformance:  s.benchmarkCachePerformance(ctx),
+		OverallScore:      0,
+	}
+
+	// Calculate overall score
+	results.OverallScore = s.calculateOverallPerformanceScore(results)
+
+	s.logger.Printf("Search benchmarks completed in %v, overall score: %.2f",
+		time.Since(start), results.OverallScore)
+
+	return results, nil
+}
+
+// WarmSearchCache preloads frequently accessed search results
+func (s *enhancedSearchService) WarmSearchCache(ctx context.Context, patterns []string) error {
+	s.logger.Printf("Starting cache warming for %d patterns", len(patterns))
+
+	for _, pattern := range patterns {
+		if err := s.preloadSearchPattern(ctx, pattern); err != nil {
+			s.logger.Printf("Failed to preload pattern %s: %v", pattern, err)
+		}
+	}
+
+	return nil
+}
+
+// GetSearchStatistics returns comprehensive search performance statistics
+func (s *enhancedSearchService) GetSearchStatistics(ctx context.Context) (*models.SearchStatistics, error) {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	stats := &models.SearchStatistics{
+		TotalSearches:        s.getTotalSearchCount(),
+		AverageResponseTime:  s.getAverageResponseTime(),
+		CacheHitRate:        s.getCacheHitRate(),
+		PopularSearches:     s.getPopularSearchPatterns(),
+		SlowQueries:         s.getSlowQueries(),
+		PerformanceMetrics:  s.getPerformanceMetrics(),
+	}
+
+	return stats, nil
+}
+
+// Helper methods for implementation
+
+func (s *enhancedSearchService) generateSemanticCacheKey(req *models.OptimizedSearchRequest) string {
+	return fmt.Sprintf("semantic:%s:%d:%.2f", req.Query, req.Limit, req.MinSimilarity)
+}
+
+func (s *enhancedSearchService) generateFullTextCacheKey(req *models.FullTextRequest) string {
+	return fmt.Sprintf("fulltext:%s:%d", req.Query, req.Limit)
+}
+
+func (s *enhancedSearchService) calculateRelevanceScore(chunk *models.UnifiedChunkRecord, query string) float64 {
+	// Implement relevance scoring based on content, tags, recency, etc.
+	score := 0.0
+
+	// Content relevance
+	if strings.Contains(strings.ToLower(chunk.Content), strings.ToLower(query)) {
+		score += 1.0
+	}
+
+	// Tag relevance
+	for _, tag := range chunk.Tags {
+		if strings.Contains(strings.ToLower(tag), strings.ToLower(query)) {
+			score += 0.5
+		}
+	}
+
+	// Recency boost
+	if chunk.UpdatedAt.After(time.Now().AddDate(0, 0, -7)) {
+		score += 0.2
+	}
+
+	return score
+}
+
+func (s *enhancedSearchService) updateSearchPattern(pattern string, duration time.Duration) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if existing, exists := s.searchPatterns[pattern]; exists {
+		existing.Frequency++
+		existing.LastUsed = time.Now()
+		existing.AvgDuration = (existing.AvgDuration + duration) / 2
+	} else {
+		s.searchPatterns[pattern] = &SearchPattern{
+			Pattern:     pattern,
+			Frequency:   1,
+			LastUsed:    time.Now(),
+			AvgDuration: duration,
+		}
+	}
+}
+
+// Additional helper methods would be implemented for:
+// - optimizeTagSearchOrder
+// - executeOptimizedTagCombination
+// - preprocessTextQuery
+// - applyRelevanceScoring
+// - generateSearchSuggestions
+// - benchmarking methods
+// - cache preloading
+// - statistics collection
+
+func (s *enhancedSearchService) startCachePreloader() {
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		s.WarmSearchCache(ctx, s.config.PreloadPatterns)
+		cancel()
+	}
+}
+
+func (s *enhancedSearchService) startPerformanceBenchmarks() {
+	ticker := time.NewTicker(s.config.BenchmarkInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		results, err := s.RunSearchBenchmarks(ctx)
+		if err != nil {
+			s.logger.Printf("Benchmark failed: %v", err)
+		} else {
+			s.logger.Printf("Benchmark completed, score: %.2f", results.OverallScore)
+		}
+		cancel()
+	}
+}

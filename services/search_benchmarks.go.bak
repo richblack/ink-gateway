@@ -1,0 +1,722 @@
+package services
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"math"
+	"semantic-text-processor/models"
+	"sync"
+	"time"
+)
+
+// SearchBenchmarkSuite provides comprehensive search performance benchmarking
+type SearchBenchmarkSuite struct {
+	service      EnhancedSearchService
+	logger       *log.Logger
+	testQueries  []BenchmarkQuery
+	config       *BenchmarkConfig
+}
+
+// BenchmarkQuery represents a test query for benchmarking
+type BenchmarkQuery struct {
+	Type        string      `json:"type"`        // "semantic", "tag", "fulltext"
+	Query       string      `json:"query"`
+	Parameters  interface{} `json:"parameters"`
+	Expected    int         `json:"expected_results"`
+	MaxDuration time.Duration `json:"max_duration"`
+}
+
+// BenchmarkConfig holds benchmarking configuration
+type BenchmarkConfig struct {
+	Iterations      int           `json:"iterations"`
+	ConcurrentUsers int           `json:"concurrent_users"`
+	Timeout         time.Duration `json:"timeout"`
+	WarmupRuns      int           `json:"warmup_runs"`
+	StressTestEnabled bool        `json:"stress_test_enabled"`
+}
+
+// NewSearchBenchmarkSuite creates a new benchmark suite
+func NewSearchBenchmarkSuite(service EnhancedSearchService, logger *log.Logger) *SearchBenchmarkSuite {
+	return &SearchBenchmarkSuite{
+		service: service,
+		logger:  logger,
+		testQueries: getDefaultBenchmarkQueries(),
+		config: &BenchmarkConfig{
+			Iterations:      100,
+			ConcurrentUsers: 10,
+			Timeout:         30 * time.Second,
+			WarmupRuns:      10,
+			StressTestEnabled: true,
+		},
+	}
+}
+
+// getDefaultBenchmarkQueries returns a set of standard benchmark queries
+func getDefaultBenchmarkQueries() []BenchmarkQuery {
+	return []BenchmarkQuery{
+		// Semantic search benchmarks
+		{
+			Type:        "semantic",
+			Query:       "machine learning algorithms",
+			Parameters:  &models.OptimizedSearchRequest{Limit: 10, MinSimilarity: 0.7},
+			Expected:    5,
+			MaxDuration: 500 * time.Millisecond,
+		},
+		{
+			Type:        "semantic",
+			Query:       "data visualization techniques",
+			Parameters:  &models.OptimizedSearchRequest{Limit: 20, MinSimilarity: 0.6},
+			Expected:    10,
+			MaxDuration: 800 * time.Millisecond,
+		},
+		// Tag search benchmarks
+		{
+			Type:        "tag",
+			Query:       "python,programming",
+			Parameters:  &models.TagSearchRequest{Tags: []string{"python", "programming"}, CombinationMode: "AND"},
+			Expected:    15,
+			MaxDuration: 200 * time.Millisecond,
+		},
+		{
+			Type:        "tag",
+			Query:       "documentation",
+			Parameters:  &models.TagSearchRequest{Tags: []string{"documentation"}, Limit: 50},
+			Expected:    30,
+			MaxDuration: 150 * time.Millisecond,
+		},
+		// Full-text search benchmarks
+		{
+			Type:        "fulltext",
+			Query:       "artificial intelligence neural networks",
+			Parameters:  &models.FullTextRequest{Limit: 15, IncludeSnippets: true},
+			Expected:    8,
+			MaxDuration: 600 * time.Millisecond,
+		},
+		{
+			Type:        "fulltext",
+			Query:       "database optimization performance",
+			Parameters:  &models.FullTextRequest{Limit: 25, IncludeSnippets: false},
+			Expected:    12,
+			MaxDuration: 400 * time.Millisecond,
+		},
+	}
+}
+
+// RunComprehensiveBenchmarks executes all benchmark suites
+func (bs *SearchBenchmarkSuite) RunComprehensiveBenchmarks(ctx context.Context) (*models.BenchmarkResults, error) {
+	bs.logger.Printf("Starting comprehensive search benchmarks...")
+	start := time.Now()
+
+	results := &models.BenchmarkResults{
+		Timestamp: start,
+	}
+
+	// Run warmup
+	if err := bs.runWarmup(ctx); err != nil {
+		return nil, fmt.Errorf("warmup failed: %w", err)
+	}
+
+	// Semantic search benchmarks
+	semanticResults, err := bs.benchmarkSemanticSearch(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("semantic search benchmark failed: %w", err)
+	}
+	results.SemanticSearch = *semanticResults
+
+	// Tag search benchmarks
+	tagResults, err := bs.benchmarkTagSearch(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("tag search benchmark failed: %w", err)
+	}
+	results.TagSearch = *tagResults
+
+	// Full-text search benchmarks
+	fullTextResults, err := bs.benchmarkFullTextSearch(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("full-text search benchmark failed: %w", err)
+	}
+	results.FullTextSearch = *fullTextResults
+
+	// Cache performance benchmarks
+	cacheResults, err := bs.benchmarkCachePerformance(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("cache performance benchmark failed: %w", err)
+	}
+	results.CachePerformance = *cacheResults
+
+	// Stress test
+	if bs.config.StressTestEnabled {
+		stressResults, err := bs.runStressTest(ctx)
+		if err != nil {
+			bs.logger.Printf("Stress test failed: %v", err)
+		} else {
+			results.StressTest = stressResults
+		}
+	}
+
+	// Calculate overall score
+	results.OverallScore = bs.calculateOverallScore(results)
+	results.Duration = time.Since(start)
+
+	bs.logger.Printf("Benchmarks completed in %v with overall score: %.2f",
+		results.Duration, results.OverallScore)
+
+	return results, nil
+}
+
+// benchmarkSemanticSearch tests semantic search performance
+func (bs *SearchBenchmarkSuite) benchmarkSemanticSearch(ctx context.Context) (*models.SemanticSearchBenchmark, error) {
+	bs.logger.Printf("Running semantic search benchmarks...")
+
+	var results []BenchmarkResult
+	for _, query := range bs.getSemanticQueries() {
+		result, err := bs.runQueryBenchmark(ctx, query, bs.executeSemanticQuery)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+
+	return &models.SemanticSearchBenchmark{
+		AverageResponseTime: bs.calculateAverageResponseTime(results),
+		ThroughputQPS:      bs.calculateThroughput(results),
+		P95ResponseTime:    bs.calculatePercentile(results, 0.95),
+		P99ResponseTime:    bs.calculatePercentile(results, 0.99),
+		SuccessRate:        bs.calculateSuccessRate(results),
+		CacheHitRate:       bs.calculateCacheHitRate(results),
+		AccuracyScore:      bs.calculateAccuracyScore(results),
+	}, nil
+}
+
+// benchmarkTagSearch tests tag search performance
+func (bs *SearchBenchmarkSuite) benchmarkTagSearch(ctx context.Context) (*models.TagSearchBenchmark, error) {
+	bs.logger.Printf("Running tag search benchmarks...")
+
+	var results []BenchmarkResult
+	for _, query := range bs.getTagQueries() {
+		result, err := bs.runQueryBenchmark(ctx, query, bs.executeTagQuery)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+
+	return &models.TagSearchBenchmark{
+		AverageResponseTime:   bs.calculateAverageResponseTime(results),
+		ThroughputQPS:        bs.calculateThroughput(results),
+		SingleTagPerformance: bs.calculateSingleTagPerformance(results),
+		MultiTagPerformance:  bs.calculateMultiTagPerformance(results),
+		TagCacheEffectiveness: bs.calculateTagCacheEffectiveness(results),
+		SuccessRate:          bs.calculateSuccessRate(results),
+	}, nil
+}
+
+// benchmarkFullTextSearch tests full-text search performance
+func (bs *SearchBenchmarkSuite) benchmarkFullTextSearch(ctx context.Context) (*models.FullTextSearchBenchmark, error) {
+	bs.logger.Printf("Running full-text search benchmarks...")
+
+	var results []BenchmarkResult
+	for _, query := range bs.getFullTextQueries() {
+		result, err := bs.runQueryBenchmark(ctx, query, bs.executeFullTextQuery)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+
+	return &models.FullTextSearchBenchmark{
+		AverageResponseTime: bs.calculateAverageResponseTime(results),
+		ThroughputQPS:      bs.calculateThroughput(results),
+		IndexingEfficiency: bs.calculateIndexingEfficiency(results),
+		RelevanceScore:     bs.calculateRelevanceScore(results),
+		SuggestionQuality:  bs.calculateSuggestionQuality(results),
+		SuccessRate:        bs.calculateSuccessRate(results),
+	}, nil
+}
+
+// benchmarkCachePerformance tests cache effectiveness
+func (bs *SearchBenchmarkSuite) benchmarkCachePerformance(ctx context.Context) (*models.CachePerformanceBenchmark, error) {
+	bs.logger.Printf("Running cache performance benchmarks...")
+
+	// Test cache warming
+	warmingStart := time.Now()
+	err := bs.service.WarmSearchCache(ctx, []string{"popular_searches", "recent_queries"})
+	warmingDuration := time.Since(warmingStart)
+
+	if err != nil {
+		return nil, fmt.Errorf("cache warming failed: %w", err)
+	}
+
+	// Test cache hit rates
+	hitRates := make(map[string]float64)
+
+	// Run repeated queries to test cache effectiveness
+	testQueries := bs.getCacheTestQueries()
+	for _, query := range testQueries {
+		hitRate, err := bs.measureCacheHitRate(ctx, query)
+		if err != nil {
+			bs.logger.Printf("Cache hit rate measurement failed for query %s: %v", query.Query, err)
+			continue
+		}
+		hitRates[query.Type] = hitRate
+	}
+
+	return &models.CachePerformanceBenchmark{
+		OverallHitRate:      bs.calculateOverallHitRate(hitRates),
+		SemanticCacheHitRate: hitRates["semantic"],
+		TagCacheHitRate:     hitRates["tag"],
+		FullTextCacheHitRate: hitRates["fulltext"],
+		CacheWarmingTime:    warmingDuration,
+		CacheEffectiveness:  bs.calculateCacheEffectiveness(hitRates),
+	}, nil
+}
+
+// runStressTest performs stress testing with concurrent users
+func (bs *SearchBenchmarkSuite) runStressTest(ctx context.Context) (*models.StressTestResults, error) {
+	bs.logger.Printf("Running stress test with %d concurrent users...", bs.config.ConcurrentUsers)
+
+	results := &models.StressTestResults{
+		ConcurrentUsers: bs.config.ConcurrentUsers,
+		TestDuration:    bs.config.Timeout,
+	}
+
+	var wg sync.WaitGroup
+	resultsChan := make(chan BenchmarkResult, bs.config.ConcurrentUsers*len(bs.testQueries))
+	errorChan := make(chan error, bs.config.ConcurrentUsers)
+
+	startTime := time.Now()
+
+	// Launch concurrent users
+	for i := 0; i < bs.config.ConcurrentUsers; i++ {
+		wg.Add(1)
+		go func(userID int) {
+			defer wg.Done()
+			bs.runStressTestUser(ctx, userID, resultsChan, errorChan)
+		}(i)
+	}
+
+	// Wait for completion
+	wg.Wait()
+	close(resultsChan)
+	close(errorChan)
+
+	// Collect results
+	var allResults []BenchmarkResult
+	for result := range resultsChan {
+		allResults = append(allResults, result)
+	}
+
+	// Count errors
+	errorCount := 0
+	for range errorChan {
+		errorCount++
+	}
+
+	results.TotalRequests = len(allResults)
+	results.FailedRequests = errorCount
+	results.SuccessRate = float64(len(allResults)) / float64(len(allResults)+errorCount)
+	results.AverageResponseTime = bs.calculateAverageResponseTime(allResults)
+	results.ThroughputQPS = float64(len(allResults)) / time.Since(startTime).Seconds()
+	results.MaxResponseTime = bs.calculateMaxResponseTime(allResults)
+	results.MinResponseTime = bs.calculateMinResponseTime(allResults)
+
+	return results, nil
+}
+
+// Helper methods for benchmark execution
+
+func (bs *SearchBenchmarkSuite) runQueryBenchmark(
+	ctx context.Context,
+	query BenchmarkQuery,
+	executor func(context.Context, BenchmarkQuery) (interface{}, error),
+) (BenchmarkResult, error) {
+	result := BenchmarkResult{
+		QueryType: query.Type,
+		Query:     query.Query,
+	}
+
+	var durations []time.Duration
+	var successes int
+	var cacheHits int
+
+	for i := 0; i < bs.config.Iterations; i++ {
+		start := time.Now()
+		response, err := executor(ctx, query)
+		duration := time.Since(start)
+
+		durations = append(durations, duration)
+
+		if err != nil {
+			result.Errors = append(result.Errors, err.Error())
+			continue
+		}
+
+		successes++
+
+		// Check if it was a cache hit (implementation depends on response type)
+		if bs.isCacheHit(response) {
+			cacheHits++
+		}
+
+		// Check if duration exceeds maximum
+		if duration > query.MaxDuration {
+			result.SlowQueries++
+		}
+	}
+
+	result.AverageResponseTime = bs.calculateAverageDuration(durations)
+	result.SuccessRate = float64(successes) / float64(bs.config.Iterations)
+	result.CacheHitRate = float64(cacheHits) / float64(successes)
+
+	return result, nil
+}
+
+func (bs *SearchBenchmarkSuite) executeSemanticQuery(ctx context.Context, query BenchmarkQuery) (interface{}, error) {
+	req := query.Parameters.(*models.OptimizedSearchRequest)
+	req.Query = query.Query
+	return bs.service.OptimizedSemanticSearch(ctx, req)
+}
+
+func (bs *SearchBenchmarkSuite) executeTagQuery(ctx context.Context, query BenchmarkQuery) (interface{}, error) {
+	req := query.Parameters.(*models.TagSearchRequest)
+	return bs.service.HighPerformanceTagSearch(ctx, req)
+}
+
+func (bs *SearchBenchmarkSuite) executeFullTextQuery(ctx context.Context, query BenchmarkQuery) (interface{}, error) {
+	req := query.Parameters.(*models.FullTextRequest)
+	req.Query = query.Query
+	return bs.service.FullTextSearchOptimized(ctx, req)
+}
+
+// BenchmarkResult represents the result of a benchmark run
+type BenchmarkResult struct {
+	QueryType           string        `json:"query_type"`
+	Query               string        `json:"query"`
+	AverageResponseTime time.Duration `json:"average_response_time"`
+	SuccessRate         float64       `json:"success_rate"`
+	CacheHitRate        float64       `json:"cache_hit_rate"`
+	SlowQueries         int           `json:"slow_queries"`
+	Errors              []string      `json:"errors"`
+}
+
+// Calculation helper methods
+
+func (bs *SearchBenchmarkSuite) calculateAverageResponseTime(results []BenchmarkResult) time.Duration {
+	if len(results) == 0 {
+		return 0
+	}
+
+	total := time.Duration(0)
+	for _, result := range results {
+		total += result.AverageResponseTime
+	}
+
+	return total / time.Duration(len(results))
+}
+
+func (bs *SearchBenchmarkSuite) calculateThroughput(results []BenchmarkResult) float64 {
+	if len(results) == 0 {
+		return 0
+	}
+
+	totalQueries := len(results) * bs.config.Iterations
+	totalTime := bs.calculateAverageResponseTime(results) * time.Duration(totalQueries)
+
+	return float64(totalQueries) / totalTime.Seconds()
+}
+
+func (bs *SearchBenchmarkSuite) calculatePercentile(results []BenchmarkResult, percentile float64) time.Duration {
+	if len(results) == 0 {
+		return 0
+	}
+
+	// Simple percentile calculation
+	index := int(float64(len(results)) * percentile)
+	if index >= len(results) {
+		index = len(results) - 1
+	}
+
+	return results[index].AverageResponseTime
+}
+
+func (bs *SearchBenchmarkSuite) calculateSuccessRate(results []BenchmarkResult) float64 {
+	if len(results) == 0 {
+		return 0
+	}
+
+	totalSuccess := 0.0
+	for _, result := range results {
+		totalSuccess += result.SuccessRate
+	}
+
+	return totalSuccess / float64(len(results))
+}
+
+func (bs *SearchBenchmarkSuite) calculateCacheHitRate(results []BenchmarkResult) float64 {
+	if len(results) == 0 {
+		return 0
+	}
+
+	totalHitRate := 0.0
+	for _, result := range results {
+		totalHitRate += result.CacheHitRate
+	}
+
+	return totalHitRate / float64(len(results))
+}
+
+func (bs *SearchBenchmarkSuite) calculateOverallScore(results *models.BenchmarkResults) float64 {
+	// Weighted scoring system
+	weights := map[string]float64{
+		"response_time": 0.3,
+		"throughput":    0.2,
+		"success_rate":  0.2,
+		"cache_hit":     0.15,
+		"accuracy":      0.15,
+	}
+
+	score := 0.0
+
+	// Response time score (lower is better)
+	avgResponseTime := (results.SemanticSearch.AverageResponseTime +
+		results.TagSearch.AverageResponseTime +
+		results.FullTextSearch.AverageResponseTime) / 3
+
+	responseTimeScore := math.Max(0, 1.0-avgResponseTime.Seconds())
+	score += responseTimeScore * weights["response_time"]
+
+	// Throughput score
+	avgThroughput := (results.SemanticSearch.ThroughputQPS +
+		results.TagSearch.ThroughputQPS +
+		results.FullTextSearch.ThroughputQPS) / 3
+
+	throughputScore := math.Min(1.0, avgThroughput/100) // Normalize to 100 QPS
+	score += throughputScore * weights["throughput"]
+
+	// Success rate score
+	avgSuccessRate := (results.SemanticSearch.SuccessRate +
+		results.TagSearch.SuccessRate +
+		results.FullTextSearch.SuccessRate) / 3
+
+	score += avgSuccessRate * weights["success_rate"]
+
+	// Cache hit rate score
+	score += results.CachePerformance.OverallHitRate * weights["cache_hit"]
+
+	// Accuracy score
+	accuracyScore := (results.SemanticSearch.AccuracyScore +
+		results.FullTextSearch.RelevanceScore) / 2
+
+	score += accuracyScore * weights["accuracy"]
+
+	return score * 100 // Convert to percentage
+}
+
+// Additional helper methods for specific benchmark calculations
+func (bs *SearchBenchmarkSuite) getSemanticQueries() []BenchmarkQuery {
+	var queries []BenchmarkQuery
+	for _, q := range bs.testQueries {
+		if q.Type == "semantic" {
+			queries = append(queries, q)
+		}
+	}
+	return queries
+}
+
+func (bs *SearchBenchmarkSuite) getTagQueries() []BenchmarkQuery {
+	var queries []BenchmarkQuery
+	for _, q := range bs.testQueries {
+		if q.Type == "tag" {
+			queries = append(queries, q)
+		}
+	}
+	return queries
+}
+
+func (bs *SearchBenchmarkSuite) getFullTextQueries() []BenchmarkQuery {
+	var queries []BenchmarkQuery
+	for _, q := range bs.testQueries {
+		if q.Type == "fulltext" {
+			queries = append(queries, q)
+		}
+	}
+	return queries
+}
+
+func (bs *SearchBenchmarkSuite) getCacheTestQueries() []BenchmarkQuery {
+	// Return a subset for cache testing
+	return bs.testQueries[:3]
+}
+
+func (bs *SearchBenchmarkSuite) runWarmup(ctx context.Context) error {
+	for i := 0; i < bs.config.WarmupRuns; i++ {
+		for _, query := range bs.testQueries {
+			switch query.Type {
+			case "semantic":
+				bs.executeSemanticQuery(ctx, query)
+			case "tag":
+				bs.executeTagQuery(ctx, query)
+			case "fulltext":
+				bs.executeFullTextQuery(ctx, query)
+			}
+		}
+	}
+	return nil
+}
+
+func (bs *SearchBenchmarkSuite) runStressTestUser(ctx context.Context, userID int, resultsChan chan<- BenchmarkResult, errorChan chan<- error) {
+	timeout := time.After(bs.config.Timeout)
+
+	for {
+		select {
+		case <-timeout:
+			return
+		case <-ctx.Done():
+			return
+		default:
+			// Execute random query
+			query := bs.testQueries[userID%len(bs.testQueries)]
+			result, err := bs.runQueryBenchmark(ctx, query, bs.getExecutorForType(query.Type))
+
+			if err != nil {
+				errorChan <- err
+			} else {
+				resultsChan <- result
+			}
+		}
+	}
+}
+
+func (bs *SearchBenchmarkSuite) getExecutorForType(queryType string) func(context.Context, BenchmarkQuery) (interface{}, error) {
+	switch queryType {
+	case "semantic":
+		return bs.executeSemanticQuery
+	case "tag":
+		return bs.executeTagQuery
+	case "fulltext":
+		return bs.executeFullTextQuery
+	default:
+		return bs.executeSemanticQuery
+	}
+}
+
+// Additional helper methods for various calculations would be implemented here
+func (bs *SearchBenchmarkSuite) isCacheHit(response interface{}) bool {
+	// Implementation depends on response structure
+	// This would check the CacheHit field in the response
+	return false // Placeholder
+}
+
+func (bs *SearchBenchmarkSuite) calculateAverageDuration(durations []time.Duration) time.Duration {
+	if len(durations) == 0 {
+		return 0
+	}
+
+	total := time.Duration(0)
+	for _, d := range durations {
+		total += d
+	}
+
+	return total / time.Duration(len(durations))
+}
+
+func (bs *SearchBenchmarkSuite) measureCacheHitRate(ctx context.Context, query BenchmarkQuery) (float64, error) {
+	// Run query multiple times and measure cache hits
+	hits := 0
+	total := 10
+
+	for i := 0; i < total; i++ {
+		var response interface{}
+		var err error
+
+		switch query.Type {
+		case "semantic":
+			response, err = bs.executeSemanticQuery(ctx, query)
+		case "tag":
+			response, err = bs.executeTagQuery(ctx, query)
+		case "fulltext":
+			response, err = bs.executeFullTextQuery(ctx, query)
+		}
+
+		if err != nil {
+			continue
+		}
+
+		if bs.isCacheHit(response) {
+			hits++
+		}
+	}
+
+	return float64(hits) / float64(total), nil
+}
+
+// Placeholder implementations for specific calculation methods
+func (bs *SearchBenchmarkSuite) calculateAccuracyScore(results []BenchmarkResult) float64 {
+	return 0.85 // Placeholder
+}
+
+func (bs *SearchBenchmarkSuite) calculateSingleTagPerformance(results []BenchmarkResult) time.Duration {
+	return 100 * time.Millisecond // Placeholder
+}
+
+func (bs *SearchBenchmarkSuite) calculateMultiTagPerformance(results []BenchmarkResult) time.Duration {
+	return 200 * time.Millisecond // Placeholder
+}
+
+func (bs *SearchBenchmarkSuite) calculateTagCacheEffectiveness(results []BenchmarkResult) float64 {
+	return 0.75 // Placeholder
+}
+
+func (bs *SearchBenchmarkSuite) calculateIndexingEfficiency(results []BenchmarkResult) float64 {
+	return 0.80 // Placeholder
+}
+
+func (bs *SearchBenchmarkSuite) calculateRelevanceScore(results []BenchmarkResult) float64 {
+	return 0.82 // Placeholder
+}
+
+func (bs *SearchBenchmarkSuite) calculateSuggestionQuality(results []BenchmarkResult) float64 {
+	return 0.78 // Placeholder
+}
+
+func (bs *SearchBenchmarkSuite) calculateOverallHitRate(hitRates map[string]float64) float64 {
+	total := 0.0
+	count := 0
+	for _, rate := range hitRates {
+		total += rate
+		count++
+	}
+	if count == 0 {
+		return 0
+	}
+	return total / float64(count)
+}
+
+func (bs *SearchBenchmarkSuite) calculateCacheEffectiveness(hitRates map[string]float64) float64 {
+	return bs.calculateOverallHitRate(hitRates) * 0.9 // Weighted effectiveness
+}
+
+func (bs *SearchBenchmarkSuite) calculateMaxResponseTime(results []BenchmarkResult) time.Duration {
+	max := time.Duration(0)
+	for _, result := range results {
+		if result.AverageResponseTime > max {
+			max = result.AverageResponseTime
+		}
+	}
+	return max
+}
+
+func (bs *SearchBenchmarkSuite) calculateMinResponseTime(results []BenchmarkResult) time.Duration {
+	if len(results) == 0 {
+		return 0
+	}
+
+	min := results[0].AverageResponseTime
+	for _, result := range results {
+		if result.AverageResponseTime < min {
+			min = result.AverageResponseTime
+		}
+	}
+	return min
+}

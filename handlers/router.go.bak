@@ -1,0 +1,212 @@
+package handlers
+
+import (
+	"net/http"
+
+	"semantic-text-processor/services"
+)
+
+// Router API 路由器
+type Router struct {
+	mediaHandler  *MediaHandler
+	searchHandler *SearchHandler
+}
+
+// NewRouter 建立新的路由器
+func NewRouter(
+	mediaProcessor services.MediaProcessor,
+	batchProcessor *services.BatchProcessor,
+	folderScanner *services.FolderScanner,
+	storageService *services.StorageService,
+	multimodalSearch services.MultimodalSearchService,
+	imageSimilarity *services.ImageSimilaritySearch,
+	slideRecommendation *services.SlideImageRecommendationService,
+) *Router {
+	return &Router{
+		mediaHandler: NewMediaHandler(
+			mediaProcessor,
+			batchProcessor,
+			folderScanner,
+			storageService,
+		),
+		searchHandler: NewSearchHandler(
+			multimodalSearch,
+			imageSimilarity,
+			slideRecommendation,
+		),
+	}
+}
+
+// SetupRoutes 設定所有路由
+func (router *Router) SetupRoutes(mux *http.ServeMux) {
+	// 媒體相關端點
+	mux.HandleFunc("/api/v1/media/upload", router.mediaHandler.UploadImage)
+	mux.HandleFunc("/api/v1/media/analyze", router.mediaHandler.AnalyzeImage)
+	mux.HandleFunc("/api/v1/media/", router.handleMediaResource) // 處理 GET/DELETE /api/v1/media/{chunk_id}
+	
+	// 批次處理端點
+	mux.HandleFunc("/api/v1/media/batch-scan", router.mediaHandler.BatchScanFolder)
+	mux.HandleFunc("/api/v1/media/batch/", router.handleBatchResource) // 處理批次相關操作
+	mux.HandleFunc("/api/v1/media/batches", router.mediaHandler.GetActiveBatches)
+	
+	// 搜尋相關端點
+	mux.HandleFunc("/api/v1/search/multimodal", router.searchHandler.MultimodalSearch)
+	mux.HandleFunc("/api/v1/search/image-similarity", router.searchHandler.SearchByImage)
+	mux.HandleFunc("/api/v1/search/slide-recommendations", router.searchHandler.RecommendImagesForSlide)
+	mux.HandleFunc("/api/v1/search/presentation-recommendations", router.searchHandler.RecommendImagesForPresentation)
+	mux.HandleFunc("/api/v1/search/duplicates", router.searchHandler.FindDuplicateImages)
+	mux.HandleFunc("/api/v1/search/similar/", router.searchHandler.GetSimilarImages)
+	
+	// 健康檢查端點
+	mux.HandleFunc("/api/v1/health", router.handleHealthCheck)
+	
+	// API 資訊端點
+	mux.HandleFunc("/api/v1/info", router.handleAPIInfo)
+}
+
+// handleMediaResource 處理媒體資源操作
+func (router *Router) handleMediaResource(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		router.mediaHandler.GetImageInfo(w, r)
+	case http.MethodDelete:
+		router.mediaHandler.DeleteImage(w, r)
+	default:
+		router.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", nil)
+	}
+}
+
+// handleBatchResource 處理批次資源操作
+func (router *Router) handleBatchResource(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	
+	if contains(path, "/status") {
+		router.mediaHandler.GetBatchStatus(w, r)
+	} else if contains(path, "/pause") {
+		router.mediaHandler.PauseBatch(w, r)
+	} else if contains(path, "/resume") {
+		router.mediaHandler.ResumeBatch(w, r)
+	} else if contains(path, "/cancel") {
+		router.mediaHandler.CancelBatch(w, r)
+	} else if contains(path, "/progress") {
+		router.mediaHandler.GetBatchProgress(w, r)
+	} else {
+		router.writeErrorResponse(w, http.StatusNotFound, "Batch endpoint not found", nil)
+	}
+}
+
+// handleHealthCheck 處理健康檢查
+func (router *Router) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		router.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", nil)
+		return
+	}
+
+	response := map[string]interface{}{
+		"status":    "healthy",
+		"timestamp": "2024-01-01T00:00:00Z", // 實際應該使用當前時間
+		"version":   "1.0.0",
+		"services": map[string]string{
+			"media_processor":     "healthy",
+			"batch_processor":     "healthy",
+			"multimodal_search":   "healthy",
+			"storage_service":     "healthy",
+		},
+	}
+
+	router.writeJSONResponse(w, http.StatusOK, response)
+}
+
+// handleAPIInfo 處理 API 資訊
+func (router *Router) handleAPIInfo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		router.writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed", nil)
+		return
+	}
+
+	response := map[string]interface{}{
+		"name":        "Multimodal MCP System API",
+		"version":     "1.0.0",
+		"description": "API for multimodal content processing and search",
+		"endpoints": map[string]interface{}{
+			"media": []string{
+				"POST /api/v1/media/upload",
+				"POST /api/v1/media/analyze",
+				"GET /api/v1/media/{chunk_id}",
+				"DELETE /api/v1/media/{chunk_id}",
+			},
+			"batch": []string{
+				"POST /api/v1/media/batch-scan",
+				"GET /api/v1/media/batch/{batch_id}/status",
+				"POST /api/v1/media/batch/{batch_id}/pause",
+				"POST /api/v1/media/batch/{batch_id}/resume",
+				"POST /api/v1/media/batch/{batch_id}/cancel",
+				"GET /api/v1/media/batch/{batch_id}/progress",
+				"GET /api/v1/media/batches",
+			},
+			"search": []string{
+				"POST /api/v1/search/multimodal",
+				"POST /api/v1/search/image-similarity",
+				"POST /api/v1/search/slide-recommendations",
+				"POST /api/v1/search/presentation-recommendations",
+				"POST /api/v1/search/duplicates",
+				"GET /api/v1/search/similar/{chunk_id}",
+			},
+			"system": []string{
+				"GET /api/v1/health",
+				"GET /api/v1/info",
+			},
+		},
+		"features": []string{
+			"Image upload and processing",
+			"AI-powered image analysis",
+			"Batch folder processing",
+			"Multimodal search (text + image)",
+			"Image similarity search",
+			"Slide image recommendations",
+			"Duplicate image detection",
+			"Real-time batch progress tracking",
+		},
+	}
+
+	router.writeJSONResponse(w, http.StatusOK, response)
+}
+
+// 輔助方法
+
+// contains 檢查字串是否包含子字串
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && s[len(s)-len(substr):] == substr || 
+		   (len(s) > len(substr) && s[:len(substr)] == substr) ||
+		   (len(s) > len(substr) && indexOf(s, substr) >= 0)
+}
+
+// indexOf 尋找子字串位置
+func indexOf(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
+}
+
+// writeJSONResponse 寫入 JSON 回應
+func (router *Router) writeJSONResponse(w http.ResponseWriter, statusCode int, data interface{}) {
+	router.mediaHandler.writeJSONResponse(w, statusCode, data)
+}
+
+// writeErrorResponse 寫入錯誤回應
+func (router *Router) writeErrorResponse(w http.ResponseWriter, statusCode int, message string, err error) {
+	router.mediaHandler.writeErrorResponse(w, statusCode, message, err)
+}
+
+// GetMediaHandler 取得媒體處理器
+func (router *Router) GetMediaHandler() *MediaHandler {
+	return router.mediaHandler
+}
+
+// GetSearchHandler 取得搜尋處理器
+func (router *Router) GetSearchHandler() *SearchHandler {
+	return router.searchHandler
+}

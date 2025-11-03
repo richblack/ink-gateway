@@ -1,0 +1,95 @@
+# Docker Compose 測試環境配置
+version: '3.8'
+
+services:
+  # Ink-Gateway 主服務
+  ink-gateway:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_API_KEY=${SUPABASE_API_KEY}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - EMBEDDING_API_KEY=${EMBEDDING_API_KEY}
+      - SERVER_PORT=8080
+      - GIN_MODE=release
+    volumes:
+      - ./logs:/app/logs
+      - ./test-data:/app/test-data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - ink-network
+
+  # MCP Server 測試服務
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_API_KEY=${SUPABASE_API_KEY}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - EMBEDDING_API_KEY=${EMBEDDING_API_KEY}
+    volumes:
+      - ./test-data:/app/test-data
+    depends_on:
+      ink-gateway:
+        condition: service_healthy
+    networks:
+      - ink-network
+
+  # 測試執行器
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    environment:
+      - GATEWAY_URL=http://ink-gateway:8080
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_API_KEY=${SUPABASE_API_KEY}
+    volumes:
+      - ./scripts:/app/scripts
+      - ./test-results:/app/test-results
+      - ./test-data:/app/test-data
+    depends_on:
+      ink-gateway:
+        condition: service_healthy
+    networks:
+      - ink-network
+    command: ["bash", "/app/scripts/docker_integration_test.sh"]
+
+  # Redis (用於快取測試)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - ink-network
+
+  # PostgreSQL (用於本地測試)
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=ink_test
+      - POSTGRES_USER=ink_user
+      - POSTGRES_PASSWORD=ink_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_test_db.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - ink-network
+
+networks:
+  ink-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

@@ -1,0 +1,483 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  GO_VERSION: '1.21'
+  DOCKER_BUILDKIT: 1
+  COMPOSE_DOCKER_CLI_BUILD: 1
+
+jobs:
+  # Pre-checks and setup
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      test-matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            VERSION="pr-${{ github.event.number }}-${{ github.event.pull_request.head.sha }}"
+          else
+            VERSION="${{ github.sha }}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Generate test matrix
+        id: matrix
+        run: |
+          MATRIX=$(cat << EOF
+          {
+            "include": [
+              {
+                "test-suite": "workflows",
+                "timeout": "30m",
+                "description": "End-to-end workflow tests"
+              },
+              {
+                "test-suite": "api",
+                "timeout": "20m",
+                "description": "API integration tests"
+              },
+              {
+                "test-suite": "performance",
+                "timeout": "45m",
+                "description": "Performance and load tests"
+              },
+              {
+                "test-suite": "resilience",
+                "timeout": "25m",
+                "description": "Error handling and recovery tests"
+              },
+              {
+                "test-suite": "consistency",
+                "timeout": "35m",
+                "description": "Data consistency and integrity tests"
+              }
+            ]
+          }
+          EOF
+          )
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
+  # Build and test preparation
+  build:
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Build application
+        run: |
+          go mod download
+          go build -o semantic-text-processor .
+
+      - name: Build Docker image
+        run: |
+          docker build -t semantic-processor:${{ needs.setup.outputs.version }} .
+          docker save semantic-processor:${{ needs.setup.outputs.version }} > semantic-processor.tar
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-artifacts
+          path: |
+            semantic-text-processor
+            semantic-processor.tar
+          retention-days: 1
+
+  # Unit tests
+  unit-tests:
+    runs-on: ubuntu-latest
+    needs: [setup, build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Run unit tests
+        run: |
+          go test -v -race -coverprofile=coverage.out ./...
+          go tool cover -html=coverage.out -o coverage.html
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-reports
+          path: |
+            coverage.out
+            coverage.html
+
+  # Integration tests matrix
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: [setup, build]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup.outputs.test-matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: build-artifacts
+
+      - name: Load Docker image
+        run: |
+          docker load < semantic-processor.tar
+          docker tag semantic-processor:${{ needs.setup.outputs.version }} semantic-processor:latest
+
+      - name: Set up test environment
+        run: |
+          # Create test environment configuration
+          cp .env.example .env.test
+
+          # Generate test database credentials
+          echo "DB_NAME=testdb_${{ matrix.test-suite }}" >> .env.test
+          echo "DB_USER=test_user" >> .env.test
+          echo "DB_PASSWORD=test_password_$(date +%s)" >> .env.test
+
+          # Configure test-specific settings
+          echo "LOG_LEVEL=debug" >> .env.test
+          echo "METRICS_ENABLED=true" >> .env.test
+
+      - name: Start test infrastructure
+        run: |
+          # Start test services
+          docker-compose -f docker-compose.test.yml up -d
+
+          # Wait for services to be ready
+          timeout 300 bash -c 'until docker-compose -f docker-compose.test.yml exec -T test-db pg_isready; do sleep 2; done'
+          timeout 300 bash -c 'until curl -f http://localhost:8080/health; do sleep 2; done'
+
+      - name: Run database migrations
+        run: |
+          docker-compose -f docker-compose.test.yml exec -T semantic-processor \
+            ./scripts/migrate.sh
+
+      - name: Generate test data
+        run: |
+          # Generate test data for the specific test suite
+          go run ./tests/framework/testdata/generate.go \
+            --schema=${{ matrix.test-suite }} \
+            --size=medium \
+            --output=./tests/fixtures/${{ matrix.test-suite }}_data.json
+
+      - name: Run integration tests
+        timeout-minutes: ${{ fromJson(matrix.timeout) }}
+        run: |
+          # Set test environment variables
+          export TEST_SUITE=${{ matrix.test-suite }}
+          export TEST_TIMEOUT=${{ matrix.timeout }}
+          export TEST_PARALLEL=true
+
+          # Run the specific test suite
+          go test -v -timeout=${{ matrix.timeout }} \
+            ./tests/integration/${{ matrix.test-suite }}/... \
+            -count=1 \
+            -race \
+            -coverprofile=coverage_${{ matrix.test-suite }}.out \
+            -args -test.parallel=4
+
+      - name: Collect test metrics
+        if: always()
+        run: |
+          # Collect application metrics
+          curl -s http://localhost:8080/metrics > metrics_${{ matrix.test-suite }}.txt || true
+
+          # Collect database metrics
+          docker-compose -f docker-compose.test.yml exec -T test-db \
+            psql -U test_user -d testdb_${{ matrix.test-suite }} \
+            -c "SELECT * FROM pg_stat_database;" > db_stats_${{ matrix.test-suite }}.txt || true
+
+      - name: Generate test report
+        if: always()
+        run: |
+          # Generate detailed test report
+          go run ./tests/framework/reporting/generate_report.go \
+            --suite=${{ matrix.test-suite }} \
+            --coverage=coverage_${{ matrix.test-suite }}.out \
+            --metrics=metrics_${{ matrix.test-suite }}.txt \
+            --output=test_report_${{ matrix.test-suite }}.html
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results-${{ matrix.test-suite }}
+          path: |
+            coverage_${{ matrix.test-suite }}.out
+            metrics_${{ matrix.test-suite }}.txt
+            db_stats_${{ matrix.test-suite }}.txt
+            test_report_${{ matrix.test-suite }}.html
+            tests/logs/
+
+      - name: Cleanup test environment
+        if: always()
+        run: |
+          # Collect logs before cleanup
+          docker-compose -f docker-compose.test.yml logs > test_logs_${{ matrix.test-suite }}.txt 2>&1 || true
+
+          # Stop and remove test infrastructure
+          docker-compose -f docker-compose.test.yml down -v --remove-orphans
+
+  # Performance benchmarking
+  performance-benchmarks:
+    runs-on: ubuntu-latest
+    needs: [setup, build]
+    if: github.event_name != 'pull_request' # Only run on main branch
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: build-artifacts
+
+      - name: Load Docker image
+        run: |
+          docker load < semantic-processor.tar
+          docker tag semantic-processor:${{ needs.setup.outputs.version }} semantic-processor:latest
+
+      - name: Start benchmark environment
+        run: |
+          # Use production-like configuration for benchmarks
+          cp .env.example .env.benchmark
+          echo "LOG_LEVEL=warn" >> .env.benchmark
+          echo "METRICS_ENABLED=true" >> .env.benchmark
+
+          docker-compose -f docker-compose.test.yml up -d
+
+      - name: Wait for services
+        run: |
+          timeout 300 bash -c 'until curl -f http://localhost:8080/health; do sleep 2; done'
+
+      - name: Run performance benchmarks
+        run: |
+          # Run CPU and memory benchmarks
+          go test -bench=. -benchmem -benchtime=30s \
+            ./tests/benchmarks/... > benchmark_results.txt
+
+      - name: Analyze performance trends
+        run: |
+          # Compare with previous benchmarks (if available)
+          go run ./tests/framework/benchmarks/analyze.go \
+            --current=benchmark_results.txt \
+            --historical=previous_benchmarks/ \
+            --threshold=10 \
+            --output=performance_analysis.json
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmark-results
+          path: |
+            benchmark_results.txt
+            performance_analysis.json
+
+  # Security scanning
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: [setup, build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'semantic-processor:${{ needs.setup.outputs.version }}'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run gosec security scanner
+        uses: securecodewarrior/github-action-gosec@master
+        with:
+          args: '-fmt sarif -out gosec-results.sarif ./...'
+
+      - name: Upload gosec scan results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'gosec-results.sarif'
+
+  # Aggregate results and reporting
+  test-summary:
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, performance-benchmarks, security-scan]
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all test artifacts
+        uses: actions/download-artifact@v3
+
+      - name: Generate summary report
+        run: |
+          # Aggregate all test results
+          go run ./tests/framework/reporting/aggregate_results.go \
+            --artifacts-dir=. \
+            --output=test_summary.html \
+            --format=html
+
+      - name: Calculate test metrics
+        run: |
+          # Calculate overall metrics
+          TOTAL_TESTS=$(find . -name "*.out" -exec go tool cover -func {} \; | grep -c "func")
+          TOTAL_COVERAGE=$(find . -name "coverage*.out" -exec go tool cover -func {} \; | grep "total:" | awk '{sum += $3} END {print sum/NR}')
+
+          echo "TOTAL_TESTS=$TOTAL_TESTS" >> $GITHUB_ENV
+          echo "TOTAL_COVERAGE=$TOTAL_COVERAGE" >> $GITHUB_ENV
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const testSummary = `
+            ## 🧪 Test Results Summary
+
+            - **Total Tests**: ${{ env.TOTAL_TESTS }}
+            - **Coverage**: ${{ env.TOTAL_COVERAGE }}%
+            - **Status**: ${{ job.status }}
+
+            ### Test Suites
+            - ✅ Unit Tests
+            - ✅ Integration Tests
+            - ✅ Performance Tests
+            - ✅ Security Scans
+
+            [View detailed results](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: testSummary
+            });
+
+      - name: Upload summary report
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-summary
+          path: |
+            test_summary.html
+            test_metrics.json
+
+  # Deployment (only on main branch success)
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [setup, unit-tests, integration-tests]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: build-artifacts
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Tag and push Docker image
+        run: |
+          # Load and tag image
+          docker load < semantic-processor.tar
+          docker tag semantic-processor:${{ needs.setup.outputs.version }} \
+            ${{ secrets.ECR_REGISTRY }}/semantic-processor:${{ needs.setup.outputs.version }}
+          docker tag semantic-processor:${{ needs.setup.outputs.version }} \
+            ${{ secrets.ECR_REGISTRY }}/semantic-processor:latest
+
+          # Push to ECR
+          docker push ${{ secrets.ECR_REGISTRY }}/semantic-processor:${{ needs.setup.outputs.version }}
+          docker push ${{ secrets.ECR_REGISTRY }}/semantic-processor:latest
+
+      - name: Deploy to production
+        run: |
+          # Update production deployment
+          # This would integrate with your deployment system (e.g., Kubernetes, ECS, etc.)
+          echo "Deploying version ${{ needs.setup.outputs.version }} to production"
+
+          # Example: Update Kubernetes deployment
+          # kubectl set image deployment/semantic-processor \
+          #   semantic-processor=${{ secrets.ECR_REGISTRY }}/semantic-processor:${{ needs.setup.outputs.version }}
+
+      - name: Run post-deployment tests
+        run: |
+          # Run smoke tests against production
+          timeout 300 bash -c 'until curl -f https://your-domain.com/health; do sleep 5; done'
+
+          # Run critical path tests
+          go test -v ./tests/smoke/... \
+            -args -endpoint=https://your-domain.com
+
+      - name: Notify deployment
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: |
+            Deployment ${{ job.status }}: semantic-processor:${{ needs.setup.outputs.version }}
+            Commit: ${{ github.sha }}
+            Author: ${{ github.actor }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -1,0 +1,427 @@
+/* 狀態列樣式 */
+.ink-plugin-status {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+}
+
+.ink-connection-icon,
+.ink-sync-icon {
+    display: inline-flex;
+    align-items: center;
+    width: 14px;
+    height: 14px;
+}
+
+.ink-connected {
+    color: var(--color-green);
+}
+
+.ink-disconnected,
+.ink-error {
+    color: var(--color-red);
+}
+
+.ink-connecting {
+    color: var(--color-yellow);
+    animation: spin 1s linear infinite;
+}
+
+.ink-syncing {
+    color: var(--color-blue);
+    animation: spin 1s linear infinite;
+}
+
+.ink-sync-error {
+    color: var(--color-red);
+}
+
+.ink-pending-count {
+    background: var(--color-accent);
+    color: var(--color-accent-text);
+    border-radius: 8px;
+    padding: 1px 4px;
+    font-size: 10px;
+    font-weight: bold;
+    min-width: 14px;
+    text-align: center;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* 狀態模態框樣式 */
+.ink-status-section {
+    margin-bottom: 20px;
+    padding: 15px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+}
+
+.ink-status-section h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    color: var(--text-accent);
+}
+
+.ink-status-item {
+    font-weight: 500;
+    margin-bottom: 5px;
+}
+
+.ink-status-detail {
+    font-size: 0.9em;
+    color: var(--text-muted);
+    margin-left: 20px;
+}
+
+.ink-button-container {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.ink-button-container button {
+    padding: 8px 16px;
+    border-radius: 4px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-secondary);
+    color: var(--text-normal);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.ink-button-container button:hover {
+    background: var(--background-modifier-hover);
+}
+
+.ink-button-container button.mod-cta {
+    background: var(--color-accent);
+    color: var(--color-accent-text);
+    border-color: var(--color-accent);
+}
+
+.ink-button-container button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* 故障排除樣式 */
+.ink-troubleshooting-buttons {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.ink-troubleshooting-buttons button {
+    padding: 10px 20px;
+    border-radius: 6px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-secondary);
+    color: var(--text-normal);
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.ink-troubleshooting-buttons button:hover {
+    background: var(--background-modifier-hover);
+    transform: translateY(-1px);
+}
+
+.ink-troubleshooting-buttons button.mod-cta {
+    background: var(--color-accent);
+    color: var(--color-accent-text);
+    border-color: var(--color-accent);
+}
+
+/* 診斷結果樣式 */
+.ink-diagnostics-results {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    padding: 15px;
+    background: var(--background-primary);
+}
+
+.ink-diagnostics-summary {
+    margin-bottom: 20px;
+    padding: 15px;
+    background: var(--background-secondary);
+    border-radius: 6px;
+}
+
+.ink-diagnostics-summary h3 {
+    margin-top: 0;
+    color: var(--text-accent);
+}
+
+.ink-diagnostics-category {
+    margin-bottom: 25px;
+}
+
+.ink-diagnostics-category h3 {
+    margin-bottom: 10px;
+    padding-bottom: 5px;
+    border-bottom: 2px solid var(--background-modifier-border);
+    color: var(--text-accent);
+}
+
+.ink-diagnostic-result {
+    margin-bottom: 10px;
+    padding: 12px;
+    border-radius: 6px;
+    border-left: 4px solid;
+}
+
+.ink-diagnostic-result.ink-pass {
+    background: var(--color-green-rgb, 0, 128, 0, 0.1);
+    border-left-color: var(--color-green);
+}
+
+.ink-diagnostic-result.ink-fail {
+    background: rgba(var(--color-red-rgb, 255, 0, 0), 0.1);
+    border-left-color: var(--color-red);
+}
+
+.ink-diagnostic-result.ink-warning {
+    background: rgba(var(--color-yellow-rgb, 255, 255, 0), 0.1);
+    border-left-color: var(--color-yellow);
+}
+
+.ink-diagnostic-result.ink-info {
+    background: rgba(var(--color-blue-rgb, 0, 0, 255), 0.1);
+    border-left-color: var(--color-blue);
+}
+
+.ink-result-header {
+    font-weight: 600;
+    margin-bottom: 5px;
+}
+
+.ink-result-message {
+    margin-bottom: 5px;
+}
+
+.ink-result-details {
+    font-size: 0.9em;
+    color: var(--text-muted);
+    font-style: italic;
+    margin-bottom: 5px;
+}
+
+.ink-result-fix {
+    font-size: 0.9em;
+    color: var(--color-accent);
+    background: rgba(var(--color-accent-rgb), 0.1);
+    padding: 8px;
+    border-radius: 4px;
+    border-left: 3px solid var(--color-accent);
+}
+
+/* 自動修復結果樣式 */
+.ink-autofix-summary {
+    padding: 15px;
+    background: var(--background-secondary);
+    border-radius: 6px;
+}
+
+.ink-autofix-summary h3 {
+    margin-top: 0;
+    color: var(--text-accent);
+}
+
+.ink-autofix-summary ul {
+    margin: 10px 0;
+    padding-left: 20px;
+}
+
+.ink-autofix-summary li {
+    margin-bottom: 5px;
+}
+
+/* 系統資訊樣式 */
+.ink-system-info {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 10px;
+    margin: 15px 0;
+}
+
+.ink-system-info dt {
+    font-weight: 600;
+    color: var(--text-accent);
+}
+
+.ink-system-info dd {
+    margin: 0;
+    font-family: var(--font-monospace);
+    font-size: 0.9em;
+    word-break: break-all;
+}
+
+/* 錯誤訊息樣式 */
+.ink-error {
+    color: var(--color-red);
+    background: rgba(var(--color-red-rgb, 255, 0, 0), 0.1);
+    padding: 10px;
+    border-radius: 4px;
+    border-left: 3px solid var(--color-red);
+}
+
+/* 設定頁面增強樣式 */
+.setting-item-description {
+    margin-bottom: 8px;
+}
+
+.setting-item-control input[type="password"] {
+    font-family: monospace;
+}
+
+.setting-item-control .slider {
+    width: 100%;
+}
+
+/* 模態框樣式增強 */
+.modal-button-container {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.modal-button-container button {
+    padding: 8px 16px;
+    border-radius: 4px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-secondary);
+    color: var(--text-normal);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.modal-button-container button:hover {
+    background: var(--background-modifier-hover);
+}
+
+.modal-button-container button.mod-cta {
+    background: var(--color-accent);
+    color: var(--color-accent-text);
+    border-color: var(--color-accent);
+}
+
+.modal-button-container button.mod-warning {
+    background: var(--color-red);
+    color: white;
+    border-color: var(--color-red);
+}
+
+/* 響應式設計 */
+@media (max-width: 768px) {
+    .ink-button-container,
+    .ink-troubleshooting-buttons {
+        flex-direction: column;
+    }
+    
+    .ink-button-container button,
+    .ink-troubleshooting-buttons button {
+        width: 100%;
+    }
+    
+    .ink-system-info {
+        grid-template-columns: 1fr;
+        gap: 5px;
+    }
+    
+    .ink-system-info dt {
+        margin-top: 10px;
+    }
+}
+
+/* 深色模式適配 */
+.theme-dark .ink-diagnostic-result.ink-pass {
+    background: rgba(0, 255, 0, 0.05);
+}
+
+.theme-dark .ink-diagnostic-result.ink-fail {
+    background: rgba(255, 0, 0, 0.05);
+}
+
+.theme-dark .ink-diagnostic-result.ink-warning {
+    background: rgba(255, 255, 0, 0.05);
+}
+
+.theme-dark .ink-diagnostic-result.ink-info {
+    background: rgba(0, 100, 255, 0.05);
+}
+
+/* 動畫效果 */
+.ink-diagnostic-result {
+    animation: fadeInUp 0.3s ease-out;
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 載入狀態 */
+.ink-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: var(--text-muted);
+}
+
+.ink-loading::before {
+    content: '';
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--background-modifier-border);
+    border-top: 2px solid var(--color-accent);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-right: 10px;
+}
+
+/* 工具提示樣式 */
+.ink-tooltip {
+    position: relative;
+    cursor: help;
+}
+
+.ink-tooltip::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--background-tooltip);
+    color: var(--text-on-accent);
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+    z-index: 1000;
+}
+
+.ink-tooltip:hover::after {
+    opacity: 1;
+}

@@ -1,0 +1,36 @@
+# MCP Server Dockerfile
+FROM golang:1.21-alpine AS builder
+
+WORKDIR /app
+
+# 安裝依賴
+RUN apk add --no-cache git
+
+# 複製 go mod 文件
+COPY go.mod go.sum ./
+RUN go mod download
+
+# 複製源碼
+COPY . .
+
+# 建構 MCP Server
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o mcp-server ./cmd/mcp-server
+
+# 最終映像
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates
+
+WORKDIR /root/
+
+# 複製執行檔
+COPY --from=builder /app/mcp-server .
+
+# 設定執行權限
+RUN chmod +x ./mcp-server
+
+# 暴露端口（MCP 使用 stdio，不需要網路端口）
+# EXPOSE 無需設定
+
+# 執行 MCP Server
+CMD ["./mcp-server"]

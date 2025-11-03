@@ -1,0 +1,24 @@
+{
+  "root": true,
+  "parser": "@typescript-eslint/parser",
+  "env": { 
+    "node": true,
+    "browser": true
+  },
+  "plugins": [
+    "@typescript-eslint"
+  ],
+  "extends": [
+    "eslint:recommended"
+  ],
+  "parserOptions": {
+    "sourceType": "module"
+  },
+  "globals": {
+    "NodeJS": "readonly"
+  },
+  "rules": {
+    "no-unused-vars": "off",
+    "no-prototype-builtins": "off"
+  }
+}

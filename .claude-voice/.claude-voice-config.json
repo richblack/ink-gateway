@@ -1,0 +1,12 @@
+{
+  "voice_enabled": true,
+  "setup_date": "/Users/youlinhsieh/Documents/ink-gateway",
+  "voice_type": "project_local",
+  "description": "專案內建語音通知系統",
+  "auto_fallback": true,
+  "fallback_order": [
+    "global (~/Documents/claude-code-voice/)",
+    "local (./.claude-voice/)",
+    "direct (~/Documents/claude-code-voice/)"
+  ]
+}
