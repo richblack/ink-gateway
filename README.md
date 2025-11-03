@@ -539,7 +539,6 @@ Claude Code 不僅是一個編程助手，更是一位能深入理解需求、�
 ## 📧 聯絡方式
 
 - Issue Tracker: [GitHub Issues](https://github.com/yourusername/ink-gateway/issues)
-- Email: your.email@example.com
 
 ---
 
