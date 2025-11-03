@@ -54,9 +54,10 @@ temp/
 # AI communication files (stored in docs/ai-communication/)
 .claude/
 .clauderc
+.claude-flow/
+.claude-voice/
 .kiro/
 .swarm/
-.claude-flow/
 my_awesome_project/
 
 # Documentation - Only expose essential user-facing docs
