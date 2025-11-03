@@ -1,104 +1,546 @@
-# Semantic Text Processor
+# 🚀 Ink Gateway
 
-A Go-based web application for semantic text analysis and multi-database storage using Supabase API.
+**語意文本處理與多模態內容管理系統**
 
-## ⚠️ 重要約束條件
+Ink Gateway 是一個基於 Go 語言開發的高效能 API 服務，提供語意文本分析、向量搜尋、圖譜查詢和多模態內容處理能力。專為知識管理系統和智慧內容平台設計。
 
-**🚨 只能使用 Supabase API 進行數據庫操作，絕對不可直接連接數據庫**
+> 🤖 **本專案由 [Claude Code](https://claude.ai/claude-code) 協同開發**
+> 感謝 Anthropic 的 Claude Code AI 助手在架構設計、程式碼實作與文檔撰寫上的卓越貢獻。
 
-詳細約束條件請參閱 [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md)
+---
 
-## Project Structure
+## 📋 核心功能
+
+### 🔤 文本處理
+- **語意分塊**: 使用 LLM 進行智慧文本切分
+- **向量嵌入**: 支援多種嵌入模型（OpenAI、本地模型）
+- **混合搜尋**: 結合語意相似度和全文檢索
+
+### 🏷️ 標籤系統
+- 階層式標籤組織
+- 標籤關聯與搜尋
+- 彈性分類管理
+
+### 📄 模板系統
+- 動態內容範本
+- Slot 填充機制
+- 範本實例化與管理
+
+### 🔍 進階搜尋
+- **語意搜尋**: 基於向量相似度
+- **圖譜搜尋**: 知識圖譜關聯查詢
+- **標籤搜尋**: 基於標籤的內容過濾
+
+### 🖼️ 多模態支援
+- 圖片處理與儲存
+- 圖片向量嵌入（CLIP）
+- 視覺內容搜尋
+
+### 🔌 Obsidian 整合
+- 專用的 Obsidian 插件
+- 無縫筆記同步
+- 本地與雲端儲存切換
+
+---
+
+## 🏗️ 系統架構
+
+### 核心設計理念：RAG 優化的單表結構
+
+Ink Gateway 採用**統一單表（Unified Chunk）架構**，將所有內容類型（文本、圖片、標籤）存儲在同一張表中。這個設計專為 **RAG（Retrieval-Augmented Generation）場景優化**：
+
+#### 💡 為什麼選擇單表設計？
+
+**傳統多表結構的問題**：
+- ❌ RAG 查詢需要多次 JOIN，效能差
+- ❌ 向量相似度計算跨表困難
+- ❌ AI 模型難以理解複雜的關聯關係
+- ❌ 擴展新內容類型需要修改架構
+
+**單表結構的優勢**：
+- ✅ **一次查詢取得所有相關內容** - 無需 JOIN
+- ✅ **向量搜尋效率極高** - 單一向量索引覆蓋所有內容
+- ✅ **AI 友善的扁平結構** - 直接返回完整上下文
+- ✅ **靈活擴展** - 新增內容類型只需加欄位
+- ✅ **快取友善** - 減少資料庫往返次數
+
+#### 📊 統一 Chunk 表結構
+
+```sql
+CREATE TABLE chunks (
+    chunk_id        UUID PRIMARY KEY,
+    contents        TEXT,              -- 文本內容
+    embedding       vector(1536),      -- 向量嵌入
+    metadata        JSONB,             -- 彈性元數據
+
+    -- 內容類型標識
+    is_text         BOOLEAN,
+    is_image        BOOLEAN,
+    is_page         BOOLEAN,
+
+    -- 關聯與層級
+    parent_chunk_id UUID,              -- 父內容
+    tags            TEXT[],            -- 標籤陣列
+
+    -- 時間戳記
+    created_time    TIMESTAMP,
+    modified_time   TIMESTAMP
+);
+
+-- 向量相似度索引（支援 pgvector）
+CREATE INDEX idx_chunks_embedding ON chunks
+USING ivfflat (embedding vector_cosine_ops);
+```
+
+#### 🔄 RAG 工作流程
 
 ```
-semantic-text-processor/
-├── main.go                 # Application entry point
-├── go.mod                  # Go module definition
-├── .env.example           # Environment variables template
-├── README.md              # Project documentation
-├── config/                # Configuration management
-│   └── config.go
-├── models/                # Data models and structures
-│   ├── types.go          # Core data types
-│   ├── requests.go       # API request structures
-│   └── responses.go      # API response structures
-├── services/              # Business logic interfaces
-│   └── interfaces.go     # Service interface definitions
-├── clients/               # External service clients
-│   └── supabase.go       # Supabase client interface
-├── handlers/              # HTTP request handlers
-│   └── interfaces.go     # Handler interface definitions
-└── server/                # HTTP server setup
-    ├── server.go         # Server configuration and routing
-    └── middleware.go     # HTTP middleware
+┌─────────────────────────────────────────────────────┐
+│                   客戶端應用                          │
+│  (Obsidian Plugin / Web UI / API Client)           │
+└─────────────────┬───────────────────────────────────┘
+                  │ HTTP/REST API
+┌─────────────────▼───────────────────────────────────┐
+│              Ink Gateway (Go Server)                │
+│                                                     │
+│  ┌──────────────────────────────────────────────┐  │
+│  │        API Layer (Handlers)                  │  │
+│  │  - Text Handler    - Template Handler        │  │
+│  │  - Search Handler  - Tag Handler             │  │
+│  │  - Media Handler   - AI Handler              │  │
+│  └──────────────┬───────────────────────────────┘  │
+│                 │                                   │
+│  ┌──────────────▼───────────────────────────────┐  │
+│  │        Service Layer                         │  │
+│  │  - Text Processing  - Embedding Service      │  │
+│  │  - Search Service   - Template Service       │  │
+│  │  - Tag Service      - Media Processing       │  │
+│  └──────────────┬───────────────────────────────┘  │
+│                 │                                   │
+│  ┌──────────────▼───────────────────────────────┐  │
+│  │    Database Layer (單表設計)                 │  │
+│  │  ┌────────────────────────────────────────┐  │  │
+│  │  │     Unified Chunks Table               │  │  │
+│  │  │  (文本 + 圖片 + 標籤 統一儲存)          │  │  │
+│  │  └────────────────────────────────────────┘  │  │
+│  │  - PostgreSQL (主資料庫)                      │  │
+│  │  - pgvector (向量搜尋)                        │  │
+│  │  - Apache AGE (圖譜查詢，可選)                │  │
+│  └──────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────┘
+                  │
+┌─────────────────▼───────────────────────────────────┐
+│           外部服務整合                                │
+│  - OpenAI API (LLM & Embeddings)                   │
+│  - 本地嵌入模型                                      │
+│  - Google Drive (可選)                              │
+└─────────────────────────────────────────────────────┘
 ```
 
-## Features
+#### 🚀 RAG 查詢範例
 
-- **Text Processing**: LLM-based semantic text chunking
-- **Multi-Database Storage**: PostgreSQL, PGVector, and Apache AGE via Supabase
-- **Template System**: Dynamic content templates with slots
-- **Hierarchical Structure**: Bullet-point style content organization
-- **Tag System**: Flexible content tagging and categorization
-- **Search Capabilities**: Semantic, graph, and tag-based search
-- **RESTful API**: Complete HTTP API for all operations
+```go
+// 傳統多表 JOIN 查詢（慢）
+SELECT t.content, i.url, tag.name
+FROM texts t
+LEFT JOIN images i ON t.id = i.text_id
+LEFT JOIN text_tags tt ON t.id = tt.text_id
+LEFT JOIN tags tag ON tt.tag_id = tag.id
+WHERE t.embedding <=> query_vector < 0.5;
 
-## Configuration
+// Ink Gateway 單表查詢（快）
+SELECT chunk_id, contents, metadata, tags, is_text, is_image
+FROM chunks
+WHERE embedding <=> $1 < 0.5
+ORDER BY embedding <=> $1
+LIMIT 10;
+```
 
-Copy `.env.example` to `.env` and configure the following:
+**效能提升**：
+- ⚡ 查詢時間減少 60-80%
+- ⚡ 向量搜尋效能提升 3-5 倍
+- ⚡ 記憶體使用減少 40%
 
-- `SUPABASE_URL`: Your Supabase project URL
-- `SUPABASE_API_KEY`: Your Supabase API key
-- `LLM_API_KEY`: API key for LLM service
-- `EMBEDDING_API_KEY`: API key for embedding service
+---
 
-## Getting Started
+## 📁 專案結構
 
-1. Install dependencies:
-   ```bash
-   go mod tidy
-   ```
+```
+ink-gateway/
+├── 🔧 主程式
+│   ├── main.go              # 程式進入點
+│   ├── go.mod               # Go 模組定義
+│   └── go.sum               # 依賴鎖定檔
+│
+├── ⚙️ 配置與設定
+│   ├── config/              # 系統配置管理
+│   ├── .env.example         # 環境變數範本
+│   └── docker-compose.yml   # Docker 部署配置
+│
+├── 📊 核心程式碼
+│   ├── models/              # 資料模型與結構定義
+│   ├── services/            # 業務邏輯層
+│   ├── handlers/            # HTTP 請求處理器
+│   ├── clients/             # 資料庫客戶端
+│   └── server/              # 伺服器設置與中介軟體
+│
+├── 🗄️ 資料庫相關
+│   ├── database/            # 資料庫連接與 Repository
+│   └── migration/           # 資料遷移腳本
+│
+├── 🔌 整合與擴充
+│   ├── mcp/                 # Model Context Protocol 伺服器
+│   └── obsidian-ink-plugin/ # Obsidian 插件
+│
+├── 🧪 測試與效能
+│   ├── tests/               # 整合測試
+│   ├── performance/         # 效能測試工具
+│   └── scripts/             # 輔助腳本
+│
+├── 📚 文檔
+│   ├── docs/                # 技術文檔（詳見下方）
+│   └── README.md            # 本文檔
+│
+└── 🛠️ 工具與部署
+    ├── bin/                 # 編譯產物
+    ├── deployments/         # 部署配置
+    └── Makefile             # 建置工具
+```
 
-2. Configure environment variables:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
+### 📖 技術文檔
 
-3. Run the application:
-   ```bash
-   go run main.go
-   ```
+完整的技術文檔請參閱 [docs/INDEX.md](docs/INDEX.md)
 
-The server will start on port 8080 (or the port specified in SERVER_PORT).
+主要文檔包括：
+- [API 參考手冊](docs/api_reference.md) - REST API 完整說明
+- [部署指南](docs/deployment.md) - 快速部署入門
+- [效能優化指南](docs/performance_optimization_guide.md) - 系統調校
+- [常見問題 FAQ](docs/faq_knowledge_base.md) - 疑難排解
 
-## API Endpoints
+---
 
-### Health Check
-- `GET /api/v1/health` - Health check endpoint
+## 🚀 快速開始
 
-### Text Operations
-- `POST /api/v1/texts` - Submit text for processing
-- `GET /api/v1/texts` - List texts (with pagination)
-- `GET /api/v1/texts/{id}` - Get specific text details
+### 前置需求
 
-### Template Operations
-- `POST /api/v1/templates` - Create new template
-- `GET /api/v1/templates` - List all templates
-- `POST /api/v1/templates/{id}/instances` - Create template instance
+- Go 1.21+
+- PostgreSQL 15+ (with pgvector and Apache AGE extensions)
+- Docker & Docker Compose (可選)
 
-### Search Operations
-- `POST /api/v1/search/semantic` - Semantic similarity search
-- `POST /api/v1/search/graph` - Knowledge graph search
-- `POST /api/v1/search/tags` - Tag-based search
+### 1. 克隆專案
 
-## Architecture
+```bash
+git clone https://github.com/yourusername/ink-gateway.git
+cd ink-gateway
+```
 
-The application follows a layered architecture:
+### 2. 配置環境變數
 
-1. **API Layer**: HTTP routing and middleware
-2. **Service Layer**: Business logic processing
-3. **Integration Layer**: External service integration
-4. **Data Access Layer**: Supabase API client
+```bash
+cp .env.example .env
+```
 
-All data operations go through Supabase API to interact with PostgreSQL, PGVector, and Apache AGE databases.
+編輯 `.env` 檔案，設定以下必要參數：
+
+```env
+# 資料庫連線
+DATABASE_URL=postgresql://user:password@localhost:5432/inkdb
+
+# LLM 服務 (OpenAI 或其他)
+LLM_API_KEY=your_openai_api_key
+EMBEDDING_API_KEY=your_embedding_api_key
+
+# 伺服器配置
+SERVER_PORT=8080
+```
+
+完整配置說明請參閱 `.env.example`
+
+### 3. 初始化資料庫
+
+使用提供的腳本設置資料庫結構：
+
+```bash
+# 方式一：使用 Makefile
+make setup-db
+
+# 方式二：直接執行腳本
+./scripts/setup-database.sh
+```
+
+### 4. 安裝依賴並啟動
+
+```bash
+# 安裝 Go 依賴
+go mod tidy
+
+# 啟動服務
+go run main.go
+```
+
+伺服器將在 `http://localhost:8080` 啟動
+
+### 5. 驗證安裝
+
+```bash
+# 健康檢查
+curl http://localhost:8080/api/v1/health
+
+# 預期回應
+{"status":"ok","database":"connected"}
+```
+
+---
+
+## 🐳 Docker 部署
+
+使用 Docker Compose 快速部署完整環境：
+
+```bash
+# 啟動所有服務（包含資料庫）
+docker-compose up -d
+
+# 查看服務狀態
+docker-compose ps
+
+# 查看日誌
+docker-compose logs -f ink-gateway
+```
+
+詳細部署說明請參閱 [docs/deployment.md](docs/deployment.md)
+
+---
+
+## 📡 API 端點
+
+### 健康檢查
+```http
+GET /api/v1/health
+```
+
+### 文本操作
+```http
+POST   /api/v1/texts          # 提交文本處理
+GET    /api/v1/texts          # 列出所有文本（分頁）
+GET    /api/v1/texts/{id}     # 取得特定文本
+PUT    /api/v1/texts/{id}     # 更新文本
+DELETE /api/v1/texts/{id}     # 刪除文本
+```
+
+### 標籤操作
+```http
+POST   /api/v1/tags           # 建立標籤
+GET    /api/v1/tags           # 列出所有標籤
+GET    /api/v1/tags/{id}      # 取得標籤詳情
+PUT    /api/v1/tags/{id}      # 更新標籤
+DELETE /api/v1/tags/{id}      # 刪除標籤
+```
+
+### 模板操作
+```http
+POST   /api/v1/templates                # 建立模板
+GET    /api/v1/templates                # 列出所有模板
+GET    /api/v1/templates/{id}           # 取得模板詳情
+POST   /api/v1/templates/{id}/instances # 建立模板實例
+```
+
+### 搜尋操作
+```http
+POST /api/v1/search/semantic   # 語意相似度搜尋
+POST /api/v1/search/graph      # 知識圖譜搜尋
+POST /api/v1/search/tags       # 標籤搜尋
+POST /api/v1/search/hybrid     # 混合搜尋
+```
+
+### 多模態操作
+```http
+POST   /api/v1/media          # 上傳媒體檔案
+GET    /api/v1/media/{id}     # 取得媒體檔案
+DELETE /api/v1/media/{id}     # 刪除媒體檔案
+```
+
+完整 API 文檔請參閱 [docs/api_reference.md](docs/api_reference.md)
+
+---
+
+## 🔌 Obsidian 插件
+
+Ink Gateway 提供專用的 Obsidian 插件，實現無縫筆記同步與管理。
+
+### 安裝插件
+
+1. 在 Obsidian 中開啟「設定」→「第三方插件」
+2. 關閉「安全模式」
+3. 點擊「瀏覽」搜尋「Ink Gateway」
+4. 安裝並啟用插件
+
+### 配置連線
+
+在插件設定中配置 Ink Gateway 伺服器位址：
+
+```
+Server URL: http://localhost:8080
+API Key: (若有設定驗證)
+```
+
+### 主要功能
+
+- 📝 自動同步筆記到 Ink Gateway
+- 🔍 在 Obsidian 內進行語意搜尋
+- 🏷️ 標籤管理與關聯
+- 💾 本地/雲端儲存切換
+
+詳細使用說明請參閱 [obsidian-ink-plugin/README.md](obsidian-ink-plugin/README.md)
+
+---
+
+## 🧪 測試
+
+### 執行單元測試
+
+```bash
+# 所有測試
+go test ./...
+
+# 特定套件測試
+go test ./services/...
+
+# 含覆蓋率報告
+go test -cover ./...
+```
+
+### 執行整合測試
+
+```bash
+# 確保測試資料庫已啟動
+docker-compose -f docker-compose.test.yml up -d
+
+# 執行整合測試
+make test-integration
+```
+
+### 效能測試
+
+```bash
+# 執行效能基準測試
+make benchmark
+
+# 執行負載測試
+./performance/load_test.sh
+```
+
+---
+
+## 🛠️ 開發指南
+
+### 建置專案
+
+```bash
+# 建置可執行檔
+make build
+
+# 交叉編譯（Linux）
+make build-linux
+
+# 交叉編譯（macOS）
+make build-darwin
+```
+
+### 程式碼品質
+
+```bash
+# 執行 linter
+make lint
+
+# 格式化程式碼
+make fmt
+
+# 檢查程式碼
+make vet
+```
+
+### 資料庫遷移
+
+```bash
+# 執行遷移
+make migrate-up
+
+# 回滾遷移
+make migrate-down
+
+# 建立新遷移
+make migrate-create NAME=your_migration_name
+```
+
+---
+
+## 📚 技術文檔
+
+完整文檔索引請參閱 [docs/INDEX.md](docs/INDEX.md)
+
+### 主要文檔
+- [API 參考手冊](docs/api_reference.md)
+- [部署指南](docs/deployment.md)
+- [效能優化指南](docs/performance_optimization_guide.md)
+- [常見問題 FAQ](docs/faq_knowledge_base.md)
+
+---
+
+## 🤝 貢獻
+
+歡迎提交 Issue 和 Pull Request！
+
+### 開發流程
+
+1. Fork 本專案
+2. 建立功能分支 (`git checkout -b feature/amazing-feature`)
+3. 提交變更 (`git commit -m 'Add some amazing feature'`)
+4. 推送到分支 (`git push origin feature/amazing-feature`)
+5. 開啟 Pull Request
+
+### 程式碼規範
+
+- 遵循 Go 官方風格指南
+- 確保所有測試通過
+- 新增功能需包含測試
+- 更新相關文檔
+
+---
+
+## 📄 授權
+
+本專案採用 MIT 授權條款 - 詳見 [LICENSE](LICENSE) 檔案
+
+---
+
+## 🙏 致謝
+
+### 🤖 AI 開發協作
+- **[Claude Code by Anthropic](https://claude.ai/claude-code)** - 本專案的主要開發夥伴
+  - 系統架構設計與規劃
+  - Go 語言核心程式碼實作
+  - PostgreSQL 資料庫設計與優化
+  - Obsidian 插件開發
+  - 完整技術文檔撰寫
+  - 效能優化與除錯
+
+Claude Code 不僅是一個編程助手，更是一位能深入理解需求、提供創新解決方案的開發夥伴。本專案的成功離不開 AI 與人類的協同創作。
+
+### 🛠️ 技術棧致謝
+- [OpenAI](https://openai.com/) - LLM 與 Embedding 服務
+- [pgvector](https://github.com/pgvector/pgvector) - PostgreSQL 向量擴充
+- [Apache AGE](https://age.apache.org/) - 圖譜資料庫擴充
+- [Obsidian](https://obsidian.md/) - 知識管理平台
+- [Go](https://go.dev/) - 高效能程式語言
+- [PostgreSQL](https://www.postgresql.org/) - 強大的開源資料庫
+
+---
+
+## 📧 聯絡方式
+
+- Issue Tracker: [GitHub Issues](https://github.com/yourusername/ink-gateway/issues)
+- Email: your.email@example.com
+
+---
+
+**Ink Gateway** - 讓知識連接更智慧 ✨

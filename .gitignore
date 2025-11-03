@@ -49,5 +49,40 @@ Thumbs.db
 
 # Temporary files
 tmp/
-temp/.claude/
+temp/
+
+# AI communication files (stored in docs/ai-communication/)
+.claude/
 .clauderc
+.kiro/
+.swarm/
+.claude-flow/
+my_awesome_project/
+
+# Documentation - Only expose essential user-facing docs
+docs/ai-communication/
+docs/requirements/
+docs/reports/
+docs/development-notes/
+docs/20251030-SPARC/
+docs/20251030-final-report/
+docs/README.md
+
+# Keep only these essential user-facing docs:
+# - docs/api_reference.md
+# - docs/deployment.md
+# - docs/GOOGLE_DRIVE_SETUP.md
+
+# Compiled binaries
+ink-gateway
+main
+semantic-text-processor
+
+# Test files in root (keep tests in tests/ directory)
+test_*.go
+simple-cors-test.go
+test-config.env
+
+# Backup files
+*.bak
+*.bak.bak
